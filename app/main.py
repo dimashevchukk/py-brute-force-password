@@ -1,6 +1,6 @@
 import time
 from hashlib import sha256
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, Event, Manager, cpu_count
 
 PASSWORD_LENGTH = 8
 PASSWORDS_TO_BRUTE_FORCE = [
@@ -16,6 +16,16 @@ PASSWORDS_TO_BRUTE_FORCE = [
     "e5f3ff26aa8075ce7513552a9af1882b4fbc2a47a3525000f6eb887ab9622207",
 ]
 TARGET_HASHES = set(PASSWORDS_TO_BRUTE_FORCE)
+TARGETS_LOCAL = None
+STOP_EVENT = None
+FOUND_PROXY = None
+
+
+def init_worker(targets_tuple, stop_event: Event, found_proxy):
+    global TARGETS_LOCAL, STOP_EVENT, FOUND_PROXY
+    TARGETS_LOCAL = set(targets_tuple)
+    STOP_EVENT = stop_event
+    FOUND_PROXY = found_proxy
 
 
 def sha256_hash_str(to_hash: str) -> str:
@@ -43,7 +53,7 @@ def slice_ranges(workers_count: int) -> list[tuple[int, int]]:
         return [(0, 10 ** PASSWORD_LENGTH)]
 
     ranges = []
-    size = 10**PASSWORD_LENGTH // workers_count
+    size = 10 ** PASSWORD_LENGTH // workers_count
 
     for worker in range(workers_count):
         start = worker * size
@@ -53,30 +63,45 @@ def slice_ranges(workers_count: int) -> list[tuple[int, int]]:
     return ranges
 
 
-def check_range(cur_range: tuple[int, int]) -> dict[str, str] | None:
+def check_range(cur_range: tuple[int, int]) -> dict[str, str]:
+    targets = TARGETS_LOCAL
+    stop = STOP_EVENT
+
     passwords = {}
-    for guess in range(cur_range[0], cur_range[1]):
+    check_interval = 100000
+
+    for i, guess in enumerate(range(cur_range[0], cur_range[1])):
+        if i % check_interval == 0 and stop.is_set():
+            break
+
         guess_str = str(guess).zfill(PASSWORD_LENGTH)
         hashed_password = sha256_hash_str(guess_str)
 
-        if hashed_password in TARGET_HASHES:
+        if hashed_password in targets:
             passwords[hashed_password] = guess_str
+            if len(passwords) >= len(targets):
+                stop.set()
+                break
 
-    return passwords if passwords else None
+    return passwords
 
 
 def print_results(passwords: dict[str, str]) -> None:
-    results_count = len(passwords)
-    passwords_to_find_count = len(TARGET_HASHES)
+    found_count = len(passwords)
+    total = len(TARGET_HASHES)
 
-    if results_count == passwords_to_find_count:
+    if found_count == total:
         print("All passwords were found")
-    elif results_count < passwords_to_find_count:
-        print(f"Only {results_count} of {passwords_to_find_count} were found")
+    else:
+        print(f"Only {found_count} of {total} were found")
 
     print("Passwords:")
-    for hashed, password in passwords.items():
-        print(f"{hashed}: {password}")
+    for password in PASSWORDS_TO_BRUTE_FORCE:
+        plaintext = passwords.get(password)
+        if plaintext is not None:
+            print(f"{password}: {plaintext}")
+        else:
+            print(f"{password}: NOT FOUND")
 
 
 if __name__ == "__main__":
@@ -85,20 +110,28 @@ if __name__ == "__main__":
     passwords = brute_force_password()
     end_time = time.perf_counter()
     print("1 process elapsed:", end_time - start_time)
-    print_results(passwords)
+    for password in PASSWORDS_TO_BRUTE_FORCE:
+        print(f"{password}: {passwords.get(password, "NOT FOUND")}")
 
     start_time = time.perf_counter()
     workers = max(1, cpu_count() - 1)
     print(f"Brute force with {workers} processes started...")
     ranges = slice_ranges(workers)
-    with Pool(workers) as pool:
+
+    manager = Manager()
+    found_proxy = manager.dict()
+    stop_event = manager.Event()
+    with Pool(
+            workers,
+            initializer=init_worker,
+            initargs=(tuple(TARGET_HASHES), stop_event, found_proxy)
+    ) as pool:
         results = pool.map(check_range, ranges)
+
     end_time = time.perf_counter()
     print(f"{workers} processes elapsed:", end_time - start_time)
 
-    merged_results = {}
-    for res in results:
-        if res:
-            for hashed, password in res.items():
-                merged_results[hashed] = password
-    print_results(merged_results)
+    merged = {}
+    for result in results:
+        merged.update(result)
+    print_results(merged)
