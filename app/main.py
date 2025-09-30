@@ -15,6 +15,7 @@ PASSWORDS_TO_BRUTE_FORCE = [
     "7e8f0ada0a03cbee48a0883d549967647b3fca6efeb0a149242f19e4b68d53d6",
     "e5f3ff26aa8075ce7513552a9af1882b4fbc2a47a3525000f6eb887ab9622207",
 ]
+TARGET_HASHES = set(PASSWORDS_TO_BRUTE_FORCE)
 
 
 def sha256_hash_str(to_hash: str) -> str:
@@ -28,17 +29,19 @@ def brute_force_password() -> dict[str, str]:
         guess_str = str(guess).zfill(PASSWORD_LENGTH)
         hashed_password = sha256_hash_str(guess_str)
 
-        if hashed_password in PASSWORDS_TO_BRUTE_FORCE:
-            passwords[guess_str] = hashed_password
-            print(f"Found {guess_str}: {hashed_password}")
+        if hashed_password in TARGET_HASHES:
+            passwords[hashed_password] = guess_str
 
-            if len(passwords) == len(PASSWORDS_TO_BRUTE_FORCE):
+            if len(passwords) == len(TARGET_HASHES):
                 break
 
     return passwords
 
 
 def slice_ranges(workers_count: int) -> list[tuple[int, int]]:
+    if workers_count == 1:
+        return [(0, 10 ** PASSWORD_LENGTH)]
+
     ranges = []
     size = 10**PASSWORD_LENGTH // workers_count
 
@@ -50,30 +53,34 @@ def slice_ranges(workers_count: int) -> list[tuple[int, int]]:
     return ranges
 
 
-def check_range(cur_range: tuple[int, int]) -> dict[str, str]:
+def check_range(cur_range: tuple[int, int]) -> dict[str, str] | None:
     passwords = {}
     for guess in range(cur_range[0], cur_range[1]):
         guess_str = str(guess).zfill(PASSWORD_LENGTH)
         hashed_password = sha256_hash_str(guess_str)
 
-        if hashed_password in PASSWORDS_TO_BRUTE_FORCE:
-            passwords[guess_str] = hashed_password
-            print(f"Found {guess_str}: {hashed_password}")
+        if hashed_password in TARGET_HASHES:
+            passwords[hashed_password] = guess_str
 
-    return passwords
+    return passwords if passwords else None
 
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
-    brute_force_password()
+    passwords = brute_force_password()
     end_time = time.perf_counter()
     print("1 process elapsed:", end_time - start_time)
+    print("Passwords:", passwords)
 
     start_time = time.perf_counter()
-    workers = cpu_count() - 1
+    workers = max(1, cpu_count() - 1)
     ranges = slice_ranges(workers)
-    print(f"Processing {workers} workers")
     with Pool(workers) as pool:
-        pool.map(check_range, ranges)
+        results = pool.map(check_range, ranges)
     end_time = time.perf_counter()
     print(f"{workers} processes elapsed:", end_time - start_time)
+    print("Passwords:")
+    for res in results:
+        if res:
+            for hashed, password in res.items():
+                print(hashed, password)
