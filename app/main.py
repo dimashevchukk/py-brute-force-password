@@ -65,22 +65,40 @@ def check_range(cur_range: tuple[int, int]) -> dict[str, str] | None:
     return passwords if passwords else None
 
 
+def print_results(passwords: dict[str, str]) -> None:
+    results_count = len(passwords)
+    passwords_to_find_count = len(TARGET_HASHES)
+
+    if results_count == passwords_to_find_count:
+        print("All passwords were found")
+    elif results_count < passwords_to_find_count:
+        print(f"Only {results_count} of {passwords_to_find_count} were found")
+
+    print("Passwords:")
+    for hashed, password in passwords.items():
+        print(f"{hashed}: {password}")
+
+
 if __name__ == "__main__":
     start_time = time.perf_counter()
+    print("Brute force with 1 process started...")
     passwords = brute_force_password()
     end_time = time.perf_counter()
     print("1 process elapsed:", end_time - start_time)
-    print("Passwords:", passwords)
+    print_results(passwords)
 
     start_time = time.perf_counter()
     workers = max(1, cpu_count() - 1)
+    print(f"Brute force with {workers} processes started...")
     ranges = slice_ranges(workers)
     with Pool(workers) as pool:
         results = pool.map(check_range, ranges)
     end_time = time.perf_counter()
     print(f"{workers} processes elapsed:", end_time - start_time)
-    print("Passwords:")
+
+    merged_results = {}
     for res in results:
         if res:
             for hashed, password in res.items():
-                print(hashed, password)
+                merged_results[hashed] = password
+    print_results(merged_results)
