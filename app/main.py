@@ -1,7 +1,8 @@
 import time
 from hashlib import sha256
+from multiprocessing import Pool, cpu_count
 
-
+PASSWORD_LENGTH = 8
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
     "cf0b0cfc90d8b4be14e00114827494ed5522e9aa1c7e6960515b58626cad0b44",
@@ -20,13 +21,59 @@ def sha256_hash_str(to_hash: str) -> str:
     return sha256(to_hash.encode("utf-8")).hexdigest()
 
 
-def brute_force_password() -> None:
-    pass
+def brute_force_password() -> dict[str, str]:
+    passwords = {}
+
+    for guess in range(10**PASSWORD_LENGTH):
+        guess_str = str(guess).zfill(PASSWORD_LENGTH)
+        hashed_password = sha256_hash_str(guess_str)
+
+        if hashed_password in PASSWORDS_TO_BRUTE_FORCE:
+            passwords[guess_str] = hashed_password
+            print(f"Found {guess_str}: {hashed_password}")
+
+            if len(passwords) == len(PASSWORDS_TO_BRUTE_FORCE):
+                break
+
+    return passwords
+
+
+def slice_ranges(workers_count: int) -> list[tuple[int, int]]:
+    ranges = []
+    size = 10**PASSWORD_LENGTH // workers_count
+
+    for worker in range(workers_count):
+        start = worker * size
+        end = (worker + 1) * size if worker < workers_count - 1 else 10 ** PASSWORD_LENGTH
+        ranges.append((start, end))
+
+    return ranges
+
+
+def check_range(cur_range: tuple[int, int]) -> dict[str, str]:
+    passwords = {}
+    for guess in range(cur_range[0], cur_range[1]):
+        guess_str = str(guess).zfill(PASSWORD_LENGTH)
+        hashed_password = sha256_hash_str(guess_str)
+
+        if hashed_password in PASSWORDS_TO_BRUTE_FORCE:
+            passwords[guess_str] = hashed_password
+            print(f"Found {guess_str}: {hashed_password}")
+
+    return passwords
 
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
     brute_force_password()
     end_time = time.perf_counter()
+    print("1 process elapsed:", end_time - start_time)
 
-    print("Elapsed:", end_time - start_time)
+    start_time = time.perf_counter()
+    workers = cpu_count() - 1
+    ranges = slice_ranges(workers)
+    print(f"Processing {workers} workers")
+    with Pool(workers) as pool:
+        pool.map(check_range, ranges)
+    end_time = time.perf_counter()
+    print(f"{workers} processes elapsed:", end_time - start_time)
